@@ -5,9 +5,9 @@ resources:
   - rbac.yaml
 
 images:
-- name: quay.io/konflux-ci/konflux-ui
-  newName: quay.io/konflux-ci/konflux-ui
-  newTag: 76c3a63732a385eb5a717c96ba6a623472edc9ef
+- name: quay.io/avi_test/avi-ui
+  newName: quay.io/avi_test/avi-ui
+  newTag: latest
 
 configMapGenerator:
   - name: proxy

@@ -32,7 +32,7 @@ spec:
             app: proxy
       initContainers:
       - name: copy-static-content
-        image: quay.io/konflux-ci/konflux-ui
+        image: quay.io/avi_test/avi-ui
         command:
           - cp
           - -R
