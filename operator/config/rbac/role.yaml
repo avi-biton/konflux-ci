@@ -124,6 +124,7 @@ rules:
   - cert-manager.io
   resources:
   - certificates
+  - clusterissuers
   - issuers
   verbs:
   - create
@@ -171,6 +172,7 @@ rules:
   resources:
   - konfluxapplicationapis
   - konfluxbuildservices
+  - konfluxcertmanagers
   - konfluxenterprisecontracts
   - konfluxes
   - konfluximagecontrollers
@@ -193,6 +195,7 @@ rules:
   resources:
   - konfluxapplicationapis/finalizers
   - konfluxbuildservices/finalizers
+  - konfluxcertmanagers/finalizers
   - konfluxenterprisecontracts/finalizers
   - konfluxes/finalizers
   - konfluximagecontrollers/finalizers
@@ -209,6 +212,7 @@ rules:
   resources:
   - konfluxapplicationapis/status
   - konfluxbuildservices/status
+  - konfluxcertmanagers/status
   - konfluxenterprisecontracts/status
   - konfluxes/status
   - konfluximagecontrollers/status
