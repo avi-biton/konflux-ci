@@ -12,3 +12,33 @@ spec:
     kind: ClusterIssuer
     name: self-signed-cluster-issuer
   secretName: serving-cert
+---
+# Create an Issuer that uses dex-cert as the Certificate Authority.
+# This ensures that certificates issued by this Issuer will have the same CA
+# as dex-cert, enabling mutual TLS trust between Dex and oauth2-proxy.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: dex-ca-issuer
+spec:
+  ca:
+    secretName: dex-cert  # dex-cert is in konflux-ui namespace (via kustomize override)
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: oauth2-proxy-ca-cert
+spec:
+  # This certificate is used by oauth2-proxy to trust the Dex service.
+  # It's issued by dex-ca-issuer (which uses dex-cert as the CA),
+  # ensuring both services share the same CA and can establish mutual TLS trust.
+  # oauth2-proxy only needs the ca.crt from this secret to verify Dex's certificate.
+  # Security: oauth2-proxy pod cannot access dex-cert secret (which contains Dex's
+  # private key), only the CA bundle from oauth2-proxy-ca-cert, maintaining isolation.
+  dnsNames:
+  - oauth2-proxy.konflux-ui.svc
+  - oauth2-proxy.konflux-ui.svc.cluster.local
+  issuerRef:
+    name: dex-ca-issuer  # Use the Issuer that references dex-cert as CA
+    kind: Issuer         # Namespace-scoped Issuer
+  secretName: oauth2-proxy-ca-cert

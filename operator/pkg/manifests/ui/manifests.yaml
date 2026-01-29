@@ -628,6 +628,7 @@ spec:
   dnsNames:
   - localhost
   - dex.konflux-ui
+  - dex.konflux-ui.svc.cluster.local
   isCA: true
   issuerRef:
     kind: ClusterIssuer
@@ -636,6 +637,20 @@ spec:
   subject:
     organizations:
     - konflux
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: oauth2-proxy-ca-cert
+  namespace: konflux-ui
+spec:
+  dnsNames:
+  - oauth2-proxy.konflux-ui.svc
+  - oauth2-proxy.konflux-ui.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: dex-ca-issuer
+  secretName: oauth2-proxy-ca-cert
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -651,3 +666,12 @@ spec:
     kind: ClusterIssuer
     name: self-signed-cluster-issuer
   secretName: serving-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: dex-ca-issuer
+  namespace: konflux-ui
+spec:
+  ca:
+    secretName: dex-cert

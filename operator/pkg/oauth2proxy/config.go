@@ -100,12 +100,46 @@ func WithAuthSettings() customization.ContainerOption {
 
 // --- TLS Configuration ---
 
-// WithTLSSkipVerify configures TLS to skip certificate verification.
-// This is needed for communication with internal Dex using self-signed certificates.
-func WithTLSSkipVerify() customization.ContainerOption {
-	return customization.WithEnv(
-		corev1.EnvVar{Name: "OAUTH2_PROXY_SSL_INSECURE_SKIP_VERIFY", Value: "true"},
-	)
+const (
+	// OAuth2ProxyCAVolumeName is the name of the volume containing oauth2-proxy's CA certificate.
+	// The CA certificate is sourced from the oauth2-proxy-ca-cert secret and is used
+	// to establish trust with the Dex service during TLS handshake.
+	// This should match the volume name used when creating the pod volume.
+	OAuth2ProxyCAVolumeName = "oauth2-proxy-ca"
+	// OAuth2ProxyCAMountPath is where oauth2-proxy's CA certificate is mounted in the container.
+	// This path is referenced by the SSL_CERT_FILE environment variable to trust Dex's TLS certificate.
+	OAuth2ProxyCAMountPath = "/etc/ssl/certs/oauth2-proxy-ca.crt"
+	// OAuth2ProxyCACertFileName is the filename of the CA certificate in the oauth2-proxy-ca-cert secret.
+	// This is the standard key name used by cert-manager for CA certificates.
+	// This is used as the key in the secret, path in KeyToPath, and subpath in volume mount.
+	OAuth2ProxyCACertFileName = "ca.crt"
+)
+
+// WithOAuth2ProxyCA configures TLS verification for the Dex service using oauth2-proxy's CA certificate.
+// This mounts the CA certificate from the oauth2-proxy-ca-cert secret and sets the SSL_CERT_FILE
+// environment variable to explicitly point oauth2-proxy (and other Go applications)
+// to the CA bundle. This is more explicit than relying on the application to scan
+// /etc/ssl/certs/ and provides better clarity and control.
+// The oauth2-proxy-ca-cert is issued by dex-ca-issuer (which uses dex-cert as CA), ensuring
+// mutual TLS trust while maintaining credential isolation: oauth2-proxy pod cannot access
+// dex-cert secret (which contains Dex's private key), only the CA bundle from oauth2-proxy-ca-cert.
+func WithOAuth2ProxyCA() customization.ContainerOption {
+	return func(c *corev1.Container, ctx customization.DeploymentContext) {
+		// Set SSL_CERT_FILE to explicitly point to the CA certificate
+		customization.WithEnv(
+			corev1.EnvVar{Name: "SSL_CERT_FILE", Value: OAuth2ProxyCAMountPath},
+		)(c, ctx)
+
+		// Mount the CA certificate file
+		customization.WithVolumeMounts(
+			corev1.VolumeMount{
+				Name:      OAuth2ProxyCAVolumeName,
+				MountPath: OAuth2ProxyCAMountPath,
+				SubPath:   OAuth2ProxyCACertFileName,
+				ReadOnly:  true,
+			},
+		)(c, ctx)
+	}
 }
 
 // --- Email Verification ---
