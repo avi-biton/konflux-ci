@@ -386,10 +386,12 @@ spec:
             description: ReleasePlanAdmissionSpec defines the desired state of ReleasePlanAdmission.
             properties:
               applications:
-                description: Applications is a list of references to applications
-                  to be released in the managed namespace
+                description: |-
+                  Applications is a list of references to applications to be released in the managed namespace.
+                  Either applications or componentGroups must be specified, but not both.
                 items:
                   type: string
+                minItems: 1
                 type: array
               collectors:
                 description: Collectors contains all the information of the collectors
@@ -451,6 +453,14 @@ spec:
                 required:
                 - items
                 type: object
+              componentGroups:
+                description: |-
+                  ComponentGroups is a list of references to component groups to be released in the managed namespace.
+                  Either applications or componentGroups must be specified, but not both.
+                items:
+                  type: string
+                minItems: 1
+                type: array
               data:
                 description: Data is an unstructured key used for providing data for
                   the managed Release Pipeline
@@ -501,6 +511,12 @@ spec:
                         description: Resolver is the name of a Tekton resolver to
                           be used (e.g. git)
                         type: string
+                      useEmptyDir:
+                        description: |-
+                          UseEmptyDir specifies whether to use an empty dir volume for the workspace.
+                          When true, the PipelineRun will use an empty dir volume. Otherwise, it will
+                          use a volume claim template by default.
+                        type: boolean
                     required:
                     - params
                     - resolver
@@ -933,9 +949,10 @@ spec:
                                   operator:
                                     description: |-
                                       Operator represents a key's relationship to the value.
-                                      Valid operators are Exists and Equal. Defaults to Equal.
+                                      Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
                                       Exists is equivalent to wildcard for value, so that a pod can
                                       tolerate all taints of a particular category.
+                                      Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
                                     type: string
                                   tolerationSeconds:
                                     description: |-
@@ -1325,10 +1342,12 @@ spec:
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
             required:
-            - applications
             - origin
             - policy
             type: object
+            x-kubernetes-validations:
+            - message: exactly one of applications or componentGroups must be specified
+              rule: has(self.applications) != has(self.componentGroups)
           status:
             description: ReleasePlanAdmissionStatus defines the observed state of
               ReleasePlanAdmission.
@@ -1437,6 +1456,9 @@ spec:
     - jsonPath: .spec.application
       name: Application
       type: string
+    - jsonPath: .spec.componentGroup
+      name: ComponentGroup
+      type: string
     - jsonPath: .spec.target
       name: Target
       type: string
@@ -1466,8 +1488,10 @@ spec:
             description: ReleasePlanSpec defines the desired state of ReleasePlan.
             properties:
               application:
-                description: Application is a reference to the application to be released
-                  in the managed namespace
+                description: |-
+                  Application is a reference to the application to be released in the managed namespace.
+                  Either application or componentGroup must be specified, but not both.
+                maxLength: 63
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
               collectors:
@@ -1530,6 +1554,13 @@ spec:
                 required:
                 - items
                 type: object
+              componentGroup:
+                description: |-
+                  ComponentGroup is a reference to the component group to be released in the managed namespace.
+                  Either application or componentGroup must be specified, but not both.
+                maxLength: 63
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
               data:
                 description: Data is an unstructured key used for providing data for
                   the managed Release Pipeline
@@ -1588,6 +1619,12 @@ spec:
                         description: Resolver is the name of a Tekton resolver to
                           be used (e.g. git)
                         type: string
+                      useEmptyDir:
+                        description: |-
+                          UseEmptyDir specifies whether to use an empty dir volume for the workspace.
+                          When true, the PipelineRun will use an empty dir volume. Otherwise, it will
+                          use a volume claim template by default.
+                        type: boolean
                     required:
                     - params
                     - resolver
@@ -2020,9 +2057,10 @@ spec:
                                   operator:
                                     description: |-
                                       Operator represents a key's relationship to the value.
-                                      Valid operators are Exists and Equal. Defaults to Equal.
+                                      Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
                                       Exists is equivalent to wildcard for value, so that a pod can
                                       tolerate all taints of a particular category.
+                                      Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
                                     type: string
                                   tolerationSeconds:
                                     description: |-
@@ -2470,6 +2508,12 @@ spec:
                         description: Resolver is the name of a Tekton resolver to
                           be used (e.g. git)
                         type: string
+                      useEmptyDir:
+                        description: |-
+                          UseEmptyDir specifies whether to use an empty dir volume for the workspace.
+                          When true, the PipelineRun will use an empty dir volume. Otherwise, it will
+                          use a volume claim template by default.
+                        type: boolean
                     required:
                     - params
                     - resolver
@@ -2902,9 +2946,10 @@ spec:
                                   operator:
                                     description: |-
                                       Operator represents a key's relationship to the value.
-                                      Valid operators are Exists and Equal. Defaults to Equal.
+                                      Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
                                       Exists is equivalent to wildcard for value, so that a pod can
                                       tolerate all taints of a particular category.
+                                      Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
                                     type: string
                                   tolerationSeconds:
                                     description: |-
@@ -3289,9 +3334,10 @@ spec:
                 required:
                 - pipelineRef
                 type: object
-            required:
-            - application
             type: object
+            x-kubernetes-validations:
+            - message: exactly one of application or componentGroup must be specified
+              rule: has(self.application) != has(self.componentGroup)
           status:
             description: ReleasePlanStatus defines the observed state of ReleasePlan.
             properties:
@@ -4376,9 +4422,16 @@ metadata:
   name: release-service-tekton-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+- apiGroups:
   - tekton.dev
   resources:
   - pipelineruns
+  - taskruns
   verbs:
   - create
   - delete
@@ -4720,7 +4773,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        image: quay.io/konflux-ci/release-service:82074a96bf1831b80623121f207cbdddaf9e08d6
+        image: quay.io/konflux-ci/release-service:55f9aedab7233572995a537f167646a776a8b837
         livenessProbe:
           httpGet:
             path: /healthz
