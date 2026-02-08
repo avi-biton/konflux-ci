@@ -649,8 +649,7 @@ spec:
     listKind: ComponentList
     plural: components
     shortNames:
-    - hascmp
-    - hc
+    - cmp
     - comp
     singular: component
   scope: Namespaced
@@ -749,7 +748,7 @@ spec:
                   Application is the name of the application resource that the component belongs to.
                   Optional.
                   !!! Will be removed when we remove old model
-                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
               build-nudges-ref:
                 description: |-
@@ -765,7 +764,7 @@ spec:
                   Optional.
                   !!! Will be removed when we remove old model
                 maxLength: 63
-                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
               containerImage:
                 description: |-
@@ -1227,6 +1226,9 @@ spec:
                       Optional.
                       !!! Will be required when we remove old model
                     type: string
+                    x-kubernetes-validations:
+                    - message: Git repository URL cannot be changed
+                      rule: self == oldSelf
                   versions:
                     description: |-
                       List of all versions for this component.
@@ -1552,10 +1554,6 @@ spec:
                   - type
                   type: object
                 type: array
-              containerImage:
-                description: ContainerImage stores the associated built container
-                  image for the component
-                type: string
               devfile:
                 description: |-
                   The devfile model for the Component CR
