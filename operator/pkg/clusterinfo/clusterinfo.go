@@ -17,14 +17,23 @@ limitations under the License.
 package clusterinfo
 
 import (
+	"context"
 	"fmt"
 
+	configv1 "github.com/openshift/api/config/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const (
+	// UnknownVersion is returned when a version cannot be determined.
+	UnknownVersion = "unknown"
 )
 
 // DiscoveryClient is an interface for discovering server resources and version.
@@ -51,28 +60,30 @@ func (p Platform) IsOpenShift() bool {
 
 // Info holds cluster environment information including platform and capabilities.
 type Info struct {
-	platform Platform
-	client   DiscoveryClient
+	platform        Platform
+	discoveryClient DiscoveryClient
+	runtimeClient   client.Client
 }
 
 // Detect discovers cluster information by querying the Kubernetes API.
-func Detect(cfg *rest.Config) (*Info, error) {
+func Detect(cfg *rest.Config, runtimeClient client.Client) (*Info, error) {
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
-	return DetectWithClient(discoveryClient)
+	return DetectWithClient(discoveryClient, runtimeClient)
 }
 
 // DetectWithClient discovers cluster information using the provided discovery client.
 // This function is useful for testing with a mock client.
-func DetectWithClient(client DiscoveryClient) (*Info, error) {
+func DetectWithClient(discoveryClient DiscoveryClient, runtimeClient client.Client) (*Info, error) {
 	info := &Info{
-		client: client,
+		discoveryClient: discoveryClient,
+		runtimeClient:   runtimeClient,
 	}
 
 	// Detect platform
-	isOpenShift, err := detectOpenShift(client)
+	isOpenShift, err := detectOpenShift(discoveryClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect platform: %w", err)
 	}
@@ -97,7 +108,41 @@ func (i *Info) IsOpenShift() bool {
 
 // K8sVersion returns the Kubernetes version info.
 func (i *Info) K8sVersion() (*version.Info, error) {
-	return i.client.ServerVersion()
+	return i.discoveryClient.ServerVersion()
+}
+
+// OpenShiftVersion returns the OpenShift version string.
+// Returns empty string if not running on OpenShift.
+// Returns UnknownVersion if running on OpenShift but the version cannot be determined.
+// This method fetches the ClusterVersion resource named "version" and extracts the version
+// from .status.desired.version.
+func (i *Info) OpenShiftVersion(ctx context.Context) (string, error) {
+	// Only attempt to fetch version if we're on OpenShift
+	if !i.IsOpenShift() {
+		return "", nil
+	}
+
+	// Return UnknownVersion if runtime client is not available
+	if i.runtimeClient == nil {
+		return UnknownVersion, nil
+	}
+
+	clusterVersion := &configv1.ClusterVersion{}
+	if err := i.runtimeClient.Get(ctx, types.NamespacedName{Name: "version"}, clusterVersion); err != nil {
+		if apierrors.IsNotFound(err) {
+			// ClusterVersion resource doesn't exist (shouldn't happen on OpenShift)
+			return UnknownVersion, nil
+		}
+		return "", fmt.Errorf("failed to get ClusterVersion: %w", err)
+	}
+
+	versionStr := clusterVersion.Status.Desired.Version
+	if versionStr == "" {
+		// Version field is empty (shouldn't happen on OpenShift)
+		return UnknownVersion, nil
+	}
+
+	return versionStr, nil
 }
 
 // HasResource checks if a specific resource kind exists in the given API group version.
@@ -119,7 +164,7 @@ func (i *Info) HasResource(groupVersion, kind string) (bool, error) {
 // This method makes a single API call, making it more efficient than calling HasResource
 // multiple times for resources in the same group version.
 func (i *Info) HasAllResources(groupVersion string, kinds []string) (bool, error) {
-	resourceList, err := i.client.ServerResourcesForGroupVersion(groupVersion)
+	resourceList, err := i.discoveryClient.ServerResourcesForGroupVersion(groupVersion)
 	if err != nil {
 		// If NotFound, the resources don't exist
 		if apierrors.IsNotFound(err) {
@@ -163,8 +208,8 @@ func (i *Info) HasCertManager() (bool, error) {
 
 // detectOpenShift checks if the operator is running on OpenShift by
 // verifying that the ClusterVersion resource exists in the config.openshift.io API group.
-func detectOpenShift(client DiscoveryClient) (bool, error) {
-	resourceList, err := client.ServerResourcesForGroupVersion("config.openshift.io/v1")
+func detectOpenShift(discoveryClient DiscoveryClient) (bool, error) {
+	resourceList, err := discoveryClient.ServerResourcesForGroupVersion("config.openshift.io/v1")
 	if err != nil {
 		// If the group doesn't exist, we're not on OpenShift
 		if apierrors.IsNotFound(err) {

@@ -55,23 +55,44 @@ func (vp *VersionPoller) Start(ctx context.Context) error {
 		lastVersion = v.GitVersion
 	}
 
+	var lastOpenShiftVersion string
+	if vp.ClusterInfo.IsOpenShift() {
+		if osv, err := vp.ClusterInfo.OpenShiftVersion(ctx); err == nil {
+			lastOpenShiftVersion = osv
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			versionChanged := false
+
+			// Check Kubernetes version
 			v, err := vp.ClusterInfo.K8sVersion()
 			if err != nil {
 				log.V(1).Info("Failed to check cluster version", "error", err)
-				continue
-			}
-			if v == nil {
-				continue
-			}
-
-			if v.GitVersion != lastVersion {
+			} else if v != nil && v.GitVersion != lastVersion {
 				log.Info("Cluster version change detected", "old", lastVersion, "new", v.GitVersion)
 				lastVersion = v.GitVersion
+				versionChanged = true
+			}
+
+			// Check OpenShift version if on OpenShift
+			if vp.ClusterInfo.IsOpenShift() {
+				osv, err := vp.ClusterInfo.OpenShiftVersion(ctx)
+				if err != nil {
+					log.V(1).Info("Failed to check OpenShift version", "error", err)
+				} else if osv != lastOpenShiftVersion {
+					log.Info("OpenShift version change detected", "old", lastOpenShiftVersion, "new", osv)
+					lastOpenShiftVersion = osv
+					versionChanged = true
+				}
+			}
+
+			// Send event if any version changed
+			if versionChanged {
 				// Sentinel object only: channel requires client.Object; handler ignores it and enqueues all KonfluxInfo.
 				select {
 				case vp.EventChannel <- event.TypedGenericEvent[client.Object]{

@@ -297,18 +297,19 @@ func (r *KonfluxInfoReconciler) ensureNamespaceExists(ctx context.Context, tc *t
 
 // generateInfoJSON generates info.json content from PublicInfo.
 // Provides defaults if fields are missing. k8sVersion is the current cluster Kubernetes version (non-cached).
-func (r *KonfluxInfoReconciler) generateInfoJSON(config *konfluxv1alpha1.PublicInfo, k8sVersion string) ([]byte, error) {
-	info := r.applyInfoDefaults(config, k8sVersion)
+func (r *KonfluxInfoReconciler) generateInfoJSON(config *konfluxv1alpha1.PublicInfo, k8sVersion, openShiftVersion string) ([]byte, error) {
+	info := r.applyInfoDefaults(config, k8sVersion, openShiftVersion)
 	return json.MarshalIndent(info, "", "    ")
 }
 
 // applyInfoDefaults applies default values to PublicInfo if not specified.
-func (r *KonfluxInfoReconciler) applyInfoDefaults(config *konfluxv1alpha1.PublicInfo, k8sVersion string) *infoJSON {
+func (r *KonfluxInfoReconciler) applyInfoDefaults(config *konfluxv1alpha1.PublicInfo, k8sVersion, openShiftVersion string) *infoJSON {
 	info := &infoJSON{
 		Environment:       "development",
 		Visibility:        "public",
 		KonfluxVersion:    version.Version,
 		KubernetesVersion: k8sVersion,
+		OpenShiftVersion:  openShiftVersion,
 		RBAC:              getDefaultRBACRoles(),
 	}
 
@@ -354,22 +355,28 @@ func (r *KonfluxInfoReconciler) reconcileInfoConfigMap(ctx context.Context, tc *
 	log := logf.FromContext(ctx)
 
 	k8sVersion := ""
+	openShiftVersion := ""
 	if r.ClusterInfo != nil {
 		if v, err := r.ClusterInfo.K8sVersion(); err == nil && v != nil {
 			k8sVersion = v.GitVersion
+		}
+		if r.ClusterInfo.IsOpenShift() {
+			if osv, err := r.ClusterInfo.OpenShiftVersion(ctx); err == nil {
+				openShiftVersion = osv
+			}
 		}
 	}
 
 	var infoJSON []byte
 	var err error
 	if info.Spec.PublicInfo != nil {
-		infoJSON, err = r.generateInfoJSON(info.Spec.PublicInfo, k8sVersion)
+		infoJSON, err = r.generateInfoJSON(info.Spec.PublicInfo, k8sVersion, openShiftVersion)
 		if err != nil {
 			return fmt.Errorf("failed to generate info.json: %w", err)
 		}
 	} else {
 		// Use default development config
-		infoJSON, err = r.generateInfoJSON(nil, k8sVersion)
+		infoJSON, err = r.generateInfoJSON(nil, k8sVersion, openShiftVersion)
 		if err != nil {
 			return fmt.Errorf("failed to generate default info.json: %w", err)
 		}
@@ -467,6 +474,7 @@ type infoJSON struct {
 	Visibility        string                              `json:"visibility"`
 	KonfluxVersion    string                              `json:"konfluxVersion,omitempty"`
 	KubernetesVersion string                              `json:"kubernetesVersion,omitempty"`
+	OpenShiftVersion  string                              `json:"openshiftVersion,omitempty"`
 	Integrations      *konfluxv1alpha1.IntegrationsConfig `json:"integrations,omitempty"`
 	StatusPageUrl     string                              `json:"statusPageUrl,omitempty"`
 	RBAC              []rbacRoleJSON                      `json:"rbac,omitempty"`

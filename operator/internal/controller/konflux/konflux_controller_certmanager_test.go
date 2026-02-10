@@ -64,7 +64,7 @@ var _ = Describe("Konflux Controller - Cert-Manager Dependency", func() {
 			mockDiscoveryClient := &certManagerMockDiscoveryClient{
 				hasCertManager: false,
 			}
-			clusterInfo, _ := clusterinfo.DetectWithClient(mockDiscoveryClient)
+			clusterInfo, _ := clusterinfo.DetectWithClient(mockDiscoveryClient, nil)
 
 			reconciler = &KonfluxReconciler{
 				Client:      fakeClient,
@@ -142,7 +142,7 @@ var _ = Describe("Konflux Controller - Cert-Manager Dependency", func() {
 			mockDiscoveryClient := &certManagerMockDiscoveryClient{
 				hasCertManager: true,
 			}
-			clusterInfo, _ := clusterinfo.DetectWithClient(mockDiscoveryClient)
+			clusterInfo, _ := clusterinfo.DetectWithClient(mockDiscoveryClient, nil)
 
 			reconciler = &KonfluxReconciler{
 				Client:      fakeClient,
@@ -235,7 +235,7 @@ var _ = Describe("Konflux Controller - Cert-Manager Dependency", func() {
 				hasCertManager: false,
 				returnError:    true,
 			}
-			clusterInfo, _ := clusterinfo.DetectWithClient(mockDiscoveryClient)
+			clusterInfo, _ := clusterinfo.DetectWithClient(mockDiscoveryClient, nil)
 
 			reconciler = &KonfluxReconciler{
 				Client:      fakeClient,

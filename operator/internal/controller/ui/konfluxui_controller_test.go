@@ -706,13 +706,13 @@ var _ = Describe("KonfluxUI Controller", func() {
 					},
 				},
 				serverVersion: &version.Info{GitVersion: "v1.29.0"},
-			})
+			}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			defaultClusterInfo, err = clusterinfo.DetectWithClient(&mockDiscoveryClient{
 				resources:     map[string]*metav1.APIResourceList{},
 				serverVersion: &version.Info{GitVersion: "v1.29.0"},
-			})
+			}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("creating the KonfluxUI resource with ingress enabled")
@@ -1130,13 +1130,13 @@ var _ = Describe("KonfluxUI Controller", func() {
 					},
 				},
 				serverVersion: &version.Info{GitVersion: "v1.29.0"},
-			})
+			}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			defaultClusterInfo, err = clusterinfo.DetectWithClient(&mockDiscoveryClient{
 				resources:     map[string]*metav1.APIResourceList{},
 				serverVersion: &version.Info{GitVersion: "v1.29.0"},
-			})
+			}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("creating the KonfluxUI resource with ingress enabled")

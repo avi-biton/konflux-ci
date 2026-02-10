@@ -34,7 +34,7 @@ func TestVersionPoller_FiresEventOnVersionChange(t *testing.T) {
 	mockDiscovery := &MockDiscoveryClient{}
 	mockDiscovery.SetVersion("v1.29.0")
 
-	clusterInfo, err := clusterinfo.DetectWithClient(mockDiscovery)
+	clusterInfo, err := clusterinfo.DetectWithClient(mockDiscovery, nil)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(clusterInfo).NotTo(gomega.BeNil())
 

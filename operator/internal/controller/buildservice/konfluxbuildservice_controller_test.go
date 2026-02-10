@@ -136,13 +136,13 @@ var _ = Describe("KonfluxBuildService Controller", func() {
 					},
 				},
 				serverVersion: &version.Info{GitVersion: "v1.29.0"},
-			})
+			}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			defaultClusterInfo, err = clusterinfo.DetectWithClient(&buildServiceMockDiscoveryClient{
 				resources:     map[string]*metav1.APIResourceList{},
 				serverVersion: &version.Info{GitVersion: "v1.29.0"},
-			})
+			}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("creating the KonfluxBuildService resource")

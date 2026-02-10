@@ -17,14 +17,19 @@ limitations under the License.
 package clusterinfo
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/onsi/gomega"
+	configv1 "github.com/openshift/api/config/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 // mockDiscoveryClient implements DiscoveryClient for testing.
@@ -75,7 +80,12 @@ func TestDetectWithClient_OpenShift(t *testing.T) {
 		},
 	}
 
-	info, err := DetectWithClient(mock)
+	// Create fake client with ClusterVersion resource
+	scheme := runtime.NewScheme()
+	_ = configv1.Install(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	info, err := DetectWithClient(mock, fakeClient)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(info.Platform()).To(gomega.Equal(OpenShift))
 	g.Expect(info.IsOpenShift()).To(gomega.BeTrue())
@@ -95,7 +105,7 @@ func TestDetectWithClient_Default(t *testing.T) {
 		},
 	}
 
-	info, err := DetectWithClient(mock)
+	info, err := DetectWithClient(mock, nil)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(info.Platform()).To(gomega.Equal(Default))
 	g.Expect(info.IsOpenShift()).To(gomega.BeFalse())
@@ -116,7 +126,7 @@ func TestDetectWithClient_OpenShiftGroupWithoutClusterVersion(t *testing.T) {
 		serverVersion: &version.Info{GitVersion: "v1.29.0"},
 	}
 
-	info, err := DetectWithClient(mock)
+	info, err := DetectWithClient(mock, nil)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(info.Platform()).To(gomega.Equal(Default), "should return Default when ClusterVersion is missing")
 }
@@ -129,7 +139,7 @@ func TestDetectWithClient_ServerVersionError(t *testing.T) {
 		versionErr: errors.New("connection refused"),
 	}
 
-	info, err := DetectWithClient(mock)
+	info, err := DetectWithClient(mock, nil)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	_, err = info.K8sVersion()
 	g.Expect(err).To(gomega.HaveOccurred())
@@ -147,7 +157,7 @@ func TestDetectWithClient_PlatformDetectionError(t *testing.T) {
 		serverVersion: &version.Info{GitVersion: "v1.29.0"},
 	}
 
-	_, err := DetectWithClient(mock)
+	_, err := DetectWithClient(mock, nil)
 	g.Expect(err).To(gomega.HaveOccurred())
 	g.Expect(err.Error()).To(gomega.ContainSubstring("failed to detect platform"))
 }
@@ -167,7 +177,7 @@ func TestInfo_K8sVersion(t *testing.T) {
 		serverVersion: expectedVersion,
 	}
 
-	info, err := DetectWithClient(mock)
+	info, err := DetectWithClient(mock, nil)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	v, err := info.K8sVersion()
 	g.Expect(err).NotTo(gomega.HaveOccurred())
@@ -230,7 +240,7 @@ func TestInfo_HasResource(t *testing.T) {
 				serverVersion: &version.Info{GitVersion: "v1.29.0"},
 			}
 
-			info, err := DetectWithClient(mock)
+			info, err := DetectWithClient(mock, nil)
 			g.Expect(err).NotTo(gomega.HaveOccurred())
 
 			result, err := info.HasResource(tt.groupVersion, tt.kind)
@@ -286,7 +296,7 @@ func TestInfo_HasTekton(t *testing.T) {
 				serverVersion: &version.Info{GitVersion: "v1.29.0"},
 			}
 
-			info, err := DetectWithClient(mock)
+			info, err := DetectWithClient(mock, nil)
 			g.Expect(err).NotTo(gomega.HaveOccurred())
 
 			result, err := info.HasTekton()
@@ -372,7 +382,7 @@ func TestInfo_HasAllResources(t *testing.T) {
 				resourceErrors: tt.resourceErrors,
 				serverVersion:  &version.Info{GitVersion: "v1.29.0"},
 			}
-			info, err := DetectWithClient(mock)
+			info, err := DetectWithClient(mock, nil)
 			g.Expect(err).NotTo(gomega.HaveOccurred())
 
 			result, err := info.HasAllResources(tt.groupVersion, tt.kinds)
@@ -410,7 +420,7 @@ func TestInfo_HasCertManager(t *testing.T) {
 					},
 					serverVersion: &version.Info{GitVersion: "v1.30.0"},
 				}
-				info, _ := DetectWithClient(mockClient)
+				info, _ := DetectWithClient(mockClient, nil)
 				return info
 			},
 			expectedResult: true,
@@ -429,7 +439,7 @@ func TestInfo_HasCertManager(t *testing.T) {
 					},
 					serverVersion: &version.Info{GitVersion: "v1.30.0"},
 				}
-				info, _ := DetectWithClient(mockClient)
+				info, _ := DetectWithClient(mockClient, nil)
 				return info
 			},
 			expectedResult: false,
@@ -448,7 +458,7 @@ func TestInfo_HasCertManager(t *testing.T) {
 					},
 					serverVersion: &version.Info{GitVersion: "v1.30.0"},
 				}
-				info, _ := DetectWithClient(mockClient)
+				info, _ := DetectWithClient(mockClient, nil)
 				return info
 			},
 			expectedResult: false,
@@ -467,7 +477,7 @@ func TestInfo_HasCertManager(t *testing.T) {
 					},
 					serverVersion: &version.Info{GitVersion: "v1.30.0"},
 				}
-				info, _ := DetectWithClient(mockClient)
+				info, _ := DetectWithClient(mockClient, nil)
 				return info
 			},
 			expectedResult: false,
@@ -488,7 +498,7 @@ func TestInfo_HasCertManager(t *testing.T) {
 					},
 					serverVersion: &version.Info{GitVersion: "v1.30.0"},
 				}
-				info, _ := DetectWithClient(mockClient)
+				info, _ := DetectWithClient(mockClient, nil)
 				return info
 			},
 			expectedResult: false,
@@ -500,7 +510,7 @@ func TestInfo_HasCertManager(t *testing.T) {
 					resources:     map[string]*metav1.APIResourceList{},
 					serverVersion: &version.Info{GitVersion: "v1.30.0"},
 				}
-				info, _ := DetectWithClient(mockClient)
+				info, _ := DetectWithClient(mockClient, nil)
 				return info
 			},
 			expectedResult: false,
@@ -536,4 +546,132 @@ func TestPlatform_IsOpenShift(t *testing.T) {
 			g.Expect(tt.platform.IsOpenShift()).To(gomega.Equal(tt.expected))
 		})
 	}
+}
+
+func TestInfo_OpenShiftVersion(t *testing.T) {
+	tests := []struct {
+		name            string
+		platform        Platform
+		clusterVersion  *configv1.ClusterVersion
+		expectedVersion string
+		expectError     bool
+	}{
+		{
+			name:     "OpenShift with valid ClusterVersion",
+			platform: OpenShift,
+			clusterVersion: &configv1.ClusterVersion{
+				ObjectMeta: metav1.ObjectMeta{Name: "version"},
+				Status: configv1.ClusterVersionStatus{
+					Desired: configv1.Release{
+						Version: "4.15.3",
+					},
+				},
+			},
+			expectedVersion: "4.15.3",
+			expectError:     false,
+		},
+		{
+			name:            "OpenShift without ClusterVersion resource",
+			platform:        OpenShift,
+			clusterVersion:  nil,
+			expectedVersion: UnknownVersion,
+			expectError:     false,
+		},
+		{
+			name:     "OpenShift with empty version field",
+			platform: OpenShift,
+			clusterVersion: &configv1.ClusterVersion{
+				ObjectMeta: metav1.ObjectMeta{Name: "version"},
+				Status: configv1.ClusterVersionStatus{
+					Desired: configv1.Release{
+						Version: "",
+					},
+				},
+			},
+			expectedVersion: UnknownVersion,
+			expectError:     false,
+		},
+		{
+			name:            "Non-OpenShift platform",
+			platform:        Default,
+			clusterVersion:  nil,
+			expectedVersion: "",
+			expectError:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+
+			// Create scheme and fake client
+			scheme := runtime.NewScheme()
+			_ = configv1.Install(scheme)
+
+			var fakeClient client.Client
+			if tt.clusterVersion != nil {
+				fakeClient = fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(tt.clusterVersion).
+					Build()
+			} else {
+				fakeClient = fake.NewClientBuilder().
+					WithScheme(scheme).
+					Build()
+			}
+
+			// Create mock discovery client
+			mockDiscovery := &mockDiscoveryClient{
+				resources:     map[string]*metav1.APIResourceList{},
+				serverVersion: &version.Info{GitVersion: "v1.29.0"},
+			}
+
+			if tt.platform == OpenShift {
+				mockDiscovery.resources["config.openshift.io/v1"] = &metav1.APIResourceList{
+					APIResources: []metav1.APIResource{
+						{Kind: "ClusterVersion"},
+					},
+				}
+			}
+
+			info, err := DetectWithClient(mockDiscovery, fakeClient)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(info.Platform()).To(gomega.Equal(tt.platform))
+
+			versionStr, err := info.OpenShiftVersion(context.Background())
+
+			if tt.expectError {
+				g.Expect(err).To(gomega.HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(versionStr).To(gomega.Equal(tt.expectedVersion))
+			}
+		})
+	}
+}
+
+func TestInfo_OpenShiftVersion_NoRuntimeClient(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	// Create OpenShift platform detection
+	mockDiscovery := &mockDiscoveryClient{
+		resources: map[string]*metav1.APIResourceList{
+			"config.openshift.io/v1": {
+				APIResources: []metav1.APIResource{
+					{Kind: "ClusterVersion"},
+				},
+			},
+		},
+		serverVersion: &version.Info{GitVersion: "v1.29.0"},
+	}
+
+	// Pass nil as runtime client
+	info, err := DetectWithClient(mockDiscovery, nil)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(info.IsOpenShift()).To(gomega.BeTrue())
+
+	// Should return UnknownVersion when runtime client is nil
+	versionStr, err := info.OpenShiftVersion(context.Background())
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(versionStr).To(gomega.Equal(UnknownVersion))
 }

@@ -644,7 +644,7 @@ func createOpenShiftClusterInfo() *clusterinfo.Info {
 		serverVersion: &version.Info{GitVersion: "v1.29.0"},
 	}
 
-	info, _ := clusterinfo.DetectWithClient(mock)
+	info, _ := clusterinfo.DetectWithClient(mock, nil)
 	return info
 }
 
@@ -655,7 +655,7 @@ func createNonOpenShiftClusterInfo() *clusterinfo.Info {
 		serverVersion: &version.Info{GitVersion: "v1.29.0"},
 	}
 
-	info, _ := clusterinfo.DetectWithClient(mock)
+	info, _ := clusterinfo.DetectWithClient(mock, nil)
 	return info
 }
 
