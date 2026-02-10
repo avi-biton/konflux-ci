@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -40,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	configv1 "github.com/openshift/api/config/v1"
 	consolev1 "github.com/openshift/api/console/v1"
 	securityv1 "github.com/openshift/api/security/v1"
 
@@ -73,6 +75,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
 	utilruntime.Must(certmanagerv1.AddToScheme(scheme))
+	utilruntime.Must(configv1.Install(scheme))
 	utilruntime.Must(consolev1.AddToScheme(scheme))
 	utilruntime.Must(securityv1.Install(scheme))
 
@@ -268,7 +271,7 @@ func main() {
 		os.Exit(1)
 	}
 	// Detect cluster information (platform, version, capabilities)
-	clusterInfo, err := clusterinfo.Detect(cfg)
+	clusterInfo, err := clusterinfo.Detect(cfg, mgr.GetClient())
 	if err != nil {
 		setupLog.Error(err, "unable to detect cluster info")
 		os.Exit(1)
@@ -277,10 +280,16 @@ func main() {
 	if v, err := clusterInfo.K8sVersion(); err == nil && v != nil {
 		k8sVer = v.GitVersion
 	}
-	setupLog.Info("Detected cluster info",
+	logFields := []any{
 		"platform", clusterInfo.Platform(),
 		"k8sVersion", k8sVer,
-	)
+	}
+	if clusterInfo.IsOpenShift() {
+		if osVer, err := clusterInfo.OpenShiftVersion(context.Background()); err == nil && osVer != "" {
+			logFields = append(logFields, "openShiftVersion", osVer)
+		}
+	}
+	setupLog.Info("Detected cluster info", logFields...)
 
 	if err := (&konflux.KonfluxReconciler{
 		Client:      mgr.GetClient(),

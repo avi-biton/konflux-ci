@@ -522,7 +522,7 @@ func createTestClusterInfo() *clusterinfo.Info {
 		resources:     map[string]*metav1.APIResourceList{},
 		serverVersion: &version.Info{GitVersion: "v1.30.0"},
 	}
-	info, _ := clusterinfo.DetectWithClient(mockClient)
+	info, _ := clusterinfo.DetectWithClient(mockClient, nil)
 	return info
 }
 
