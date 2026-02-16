@@ -34,8 +34,9 @@ jobs:
       checks: write
     outputs:
       operator: ${{ steps.changed-files.outputs.any_changed }}
-      check_run_id: ${{ steps.create-check.outputs.check_run_id }}
+      check_run_id_amd64: ${{ steps.create-check.outputs.check_run_id_amd64 }}
       check_run_id_arm64: ${{ steps.create-check.outputs.check_run_id_arm64 }}
+      check_run_id_macos: ${{ steps.create-check.outputs.check_run_id_macos }}
     steps:
       - name: Set checkout ref
         id: set-ref
@@ -54,7 +55,7 @@ jobs:
         with:
           script: |
             const head_sha = '${{ steps.set-ref.outputs.ref }}';
-            const { data: e2e } = await github.rest.checks.create({
+            const { data: amd64 } = await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               name: 'Run Operator E2E Tests (AMD64)',
@@ -68,8 +69,16 @@ jobs:
               head_sha,
               status: 'in_progress'
             });
-            core.setOutput('check_run_id', e2e.id);
+            const { data: macos } = await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Run Operator E2E Tests (macOS)',
+              head_sha,
+              status: 'in_progress'
+            });
+            core.setOutput('check_run_id_amd64', amd64.id);
             core.setOutput('check_run_id_arm64', arm64.id);
+            core.setOutput('check_run_id_macos', macos.id);
       - name: Checkout PR branch
         uses: actions/checkout@v6
         with:
@@ -101,8 +110,9 @@ jobs:
             runner: ubuntu-latest
             kind_binary: kind-linux-amd64
             kubectl_arch: amd64
-            image_suffix: ""
-            cluster_suffix: ""
+            kubectl_os: linux
+            image_suffix: "-amd64"
+            cluster_suffix: "-amd"
             test_scope: "integration+e2e"
             konflux_cr: "operator/config/samples/konflux-e2e.yaml"
             job_name: "Run Operator E2E Tests (AMD64)"
@@ -110,11 +120,22 @@ jobs:
             runner: ubuntu-24.04-arm
             kind_binary: kind-linux-arm64
             kubectl_arch: arm64
+            kubectl_os: linux
             image_suffix: "-arm64"
             cluster_suffix: "-arm"
             test_scope: "integration+e2e"
             konflux_cr: "operator/config/samples/konflux-e2e.yaml"
             job_name: "Run Operator E2E Tests (ARM64)"
+          - arch: arm64
+            runner: macos-15
+            kind_binary: kind-darwin-arm64
+            kubectl_arch: arm64
+            kubectl_os: darwin
+            image_suffix: "-mac"
+            cluster_suffix: "-mac"
+            test_scope: "integration+e2e"
+            konflux_cr: "operator/config/samples/konflux-e2e.yaml"
+            job_name: "Run Operator E2E Tests (macOS)"
     steps:
       - name: Skip test - no operator changes
         run: |
@@ -133,8 +154,9 @@ jobs:
             runner: ubuntu-latest
             kind_binary: kind-linux-amd64
             kubectl_arch: amd64
-            image_suffix: ""
-            cluster_suffix: ""
+            kubectl_os: linux
+            image_suffix: "-amd64"
+            cluster_suffix: "-amd"
             test_scope: "integration+e2e"
             konflux_cr: "operator/config/samples/konflux-e2e.yaml"
             job_name: "Run Operator E2E Tests (AMD64)"
@@ -142,11 +164,22 @@ jobs:
             runner: ubuntu-24.04-arm
             kind_binary: kind-linux-arm64
             kubectl_arch: arm64
+            kubectl_os: linux
             image_suffix: "-arm64"
             cluster_suffix: "-arm"
             test_scope: "integration+e2e"
             konflux_cr: "operator/config/samples/konflux-e2e.yaml"
             job_name: "Run Operator E2E Tests (ARM64)"
+          - arch: arm64
+            runner: macos-15
+            kind_binary: kind-darwin-arm64
+            kubectl_arch: arm64
+            kubectl_os: darwin
+            image_suffix: "-mac"
+            cluster_suffix: "-mac"
+            test_scope: "integration+e2e"
+            konflux_cr: "operator/config/samples/konflux-e2e.yaml"
+            job_name: "Run Operator E2E Tests (macOS)"
     env:
       # renovate: datasource=github-releases depName=kubernetes-sigs/kind
       KIND_VERSION: "0.31.0"
@@ -170,6 +203,7 @@ jobs:
           echo "ref=$ref" >> $GITHUB_OUTPUT
           echo "Trigger: ${{ github.event_name }} → checkout ref: $ref"
       - name: Free Disk Space (Ubuntu)
+        if: runner.os == 'Linux'
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: false
@@ -181,6 +215,7 @@ jobs:
           ref: ${{ steps.set-ref.outputs.ref }}
 
       - name: Disable AppArmor
+        if: runner.os == 'Linux'
         # works around a change in ubuntu 24.04 that restricts Linux namespace access
         # for unprivileged users
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -199,12 +234,64 @@ jobs:
 
       - name: Install kubectl (${{ matrix.arch }})
         run: |
-          curl -LO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${{ matrix.kubectl_arch }}/kubectl"
+          curl -LO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/${{ matrix.kubectl_os }}/${{ matrix.kubectl_arch }}/kubectl"
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/kubectl
 
       - name: Verify kind installation
         run: kind version
+
+      - name: Install Docker and Colima (macOS only)
+        if: runner.os == 'macOS'
+        uses: gerlero/brew-install@v1
+        with:
+          packages: docker colima qemu
+          cache: true
+
+      - name: Start Colima with software emulation (macOS only)
+        if: runner.os == 'macOS'
+        run: |
+          # GitHub macOS runners don't expose Hypervisor.framework (HVF),
+          # so we wrap the QEMU binary to force TCG (software emulation).
+          REAL_QEMU="$(brew --prefix)/bin/qemu-system-aarch64"
+          WRAPPER_DIR="$HOME/.local/bin"
+          mkdir -p "$WRAPPER_DIR"
+          cat > "$WRAPPER_DIR/qemu-system-aarch64" <<'WRAPPER'
+          #!/bin/bash
+          REAL_QEMU=__REAL_QEMU__
+          args=()
+          for arg in "$@"; do
+            case "$arg" in
+              *accel=hvf*) arg="${arg//accel=hvf/accel=tcg}" ;;
+            esac
+            args+=("$arg")
+          done
+          # Replace -cpu host (requires HVF) with -cpu max (works with TCG)
+          exec "$REAL_QEMU" "${args[@]/#-cpu host/-cpu max}"
+          WRAPPER
+          sed -i '' "s|__REAL_QEMU__|$REAL_QEMU|" "$WRAPPER_DIR/qemu-system-aarch64"
+          sed -i '' 's/^          //' "$WRAPPER_DIR/qemu-system-aarch64"
+          chmod +x "$WRAPPER_DIR/qemu-system-aarch64"
+          export PATH="$WRAPPER_DIR:$PATH"
+
+          colima start \
+            --cpu 3 \
+            --memory 6 \
+            --disk 20 \
+            --vm-type qemu
+
+          # Wait for Docker to be ready
+          echo "Waiting for Docker daemon..."
+          for i in {1..60}; do
+            if docker info > /dev/null 2>&1; then
+              echo "Docker is ready!"
+              break
+            fi
+            echo "Attempt $i/60..."
+            sleep 5
+          done
+
+          docker version
 
       - name: Deploy Konflux using deploy-local.sh
         working-directory: ${{ github.workspace }}
@@ -284,12 +371,12 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v6
         with:
-          name: logs-${{ matrix.arch }}
+          name: logs-${{ matrix.arch }}${{ matrix.cluster_suffix }}
           path: logs
 
   # Report check result to PR when triggered by /allow (so the run appears on the PR and can gate it)
   report-operator-e2e-status:
-    if: always() && needs.check-changes.outputs.check_run_id != ''
+    if: always() && needs.check-changes.outputs.check_run_id_amd64 != ''
     needs: [check-changes, test-skip, test]
     runs-on: ubuntu-latest
     permissions:
@@ -299,18 +386,21 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const checkRunId = parseInt(process.env.CHECK_RUN_ID);
+            const checkRunIdAmd64 = parseInt(process.env.CHECK_RUN_ID_AMD64);
             const checkRunIdArm64 = parseInt(process.env.CHECK_RUN_ID_ARM64);
+            const checkRunIdMacos = parseInt(process.env.CHECK_RUN_ID_MACOS);
             const testResult = process.env.TEST_RESULT;
             const testSkipResult = process.env.TEST_SKIP_RESULT;
             let conclusion = 'failure';
             if (testResult === 'success' || testSkipResult === 'success') conclusion = 'success';
             else if (testResult === 'cancelled' || testSkipResult === 'cancelled') conclusion = 'cancelled';
             const update = { owner: context.repo.owner, repo: context.repo.repo, status: 'completed', conclusion };
-            await github.rest.checks.update({ ...update, check_run_id: checkRunId });
+            await github.rest.checks.update({ ...update, check_run_id: checkRunIdAmd64 });
             await github.rest.checks.update({ ...update, check_run_id: checkRunIdArm64 });
+            await github.rest.checks.update({ ...update, check_run_id: checkRunIdMacos });
         env:
-          CHECK_RUN_ID: ${{ needs.check-changes.outputs.check_run_id }}
+          CHECK_RUN_ID_AMD64: ${{ needs.check-changes.outputs.check_run_id_amd64 }}
           CHECK_RUN_ID_ARM64: ${{ needs.check-changes.outputs.check_run_id_arm64 }}
+          CHECK_RUN_ID_MACOS: ${{ needs.check-changes.outputs.check_run_id_macos }}
           TEST_RESULT: ${{ needs.test.result }}
           TEST_SKIP_RESULT: ${{ needs.test-skip.result }}
