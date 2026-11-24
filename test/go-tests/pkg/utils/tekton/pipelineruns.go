@@ -292,6 +292,72 @@ func GetVerifyConformaLogs(c crclient.Client, ki kubernetes.Interface, pr *pipel
 	return "", nil
 }
 
+func conditionStatus(cond *apis.Condition) string {
+	if cond == nil {
+		return ""
+	}
+	return string(cond.Status)
+}
+
+// FormatPipelineRunCondition is the Succeeded condition in one line, including the
+// message Tekton uses to name the failing task.
+func FormatPipelineRunCondition(pr *pipeline.PipelineRun) string {
+	cond := pr.GetStatusCondition().GetCondition(apis.ConditionSucceeded)
+	return fmt.Sprintf("PipelineRun %s/%s status=%s reason=%s message=%s",
+		pr.Namespace, pr.Name, conditionStatus(cond), cond.GetReason(), cond.GetMessage())
+}
+
+// FormatChildTaskStatus describes one child TaskRun. getErr is set when the
+// TaskRun object could not be loaded; the line still names the pipeline task.
+func FormatChildTaskStatus(pipelineTaskName, taskRunName string, tr *pipeline.TaskRun, getErr error) string {
+	if getErr != nil {
+		return fmt.Sprintf("  - task=%s TaskRun=%s: failed to get TaskRun: %v\n", pipelineTaskName, taskRunName, getErr)
+	}
+	if tr == nil {
+		return fmt.Sprintf("  - task=%s TaskRun=%s: missing TaskRun\n", pipelineTaskName, taskRunName)
+	}
+	name := tr.Name
+	if name == "" {
+		name = taskRunName
+	}
+	cond := tr.GetStatusCondition().GetCondition(apis.ConditionSucceeded)
+	pod := tr.Status.PodName
+	if pod == "" {
+		pod = "(none)"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "  - task=%s TaskRun=%s pod=%s status=%s reason=%s message=%s\n",
+		pipelineTaskName, name, pod, conditionStatus(cond), cond.GetReason(), cond.GetMessage())
+	for _, step := range tr.Status.Steps {
+		switch {
+		case step.Terminated != nil:
+			fmt.Fprintf(&b, "      step %s container=%s terminated reason=%s exitCode=%d message=%s\n",
+				step.Name, step.Container, step.Terminated.Reason, step.Terminated.ExitCode, step.Terminated.Message)
+		case step.Running != nil:
+			fmt.Fprintf(&b, "      step %s container=%s running\n", step.Name, step.Container)
+		case step.Waiting != nil:
+			fmt.Fprintf(&b, "      step %s container=%s waiting reason=%s message=%s\n",
+				step.Name, step.Container, step.Waiting.Reason, step.Waiting.Message)
+		default:
+			fmt.Fprintf(&b, "      step %s container=%s not started\n", step.Name, step.Container)
+		}
+	}
+	return b.String()
+}
+
+// FormatSkippedTasks lists tasks Tekton skipped. Empty when none were skipped.
+func FormatSkippedTasks(pr *pipeline.PipelineRun) string {
+	if len(pr.Status.SkippedTasks) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Skipped tasks:\n")
+	for _, st := range pr.Status.SkippedTasks {
+		fmt.Fprintf(&b, "  - task=%s reason=%s\n", st.Name, st.Reason)
+	}
+	return b.String()
+}
+
 func HasPipelineRunSucceeded(pr *pipeline.PipelineRun) bool {
 	return pr.GetStatusCondition().GetCondition(apis.ConditionSucceeded).IsTrue()
 }

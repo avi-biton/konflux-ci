@@ -11,11 +11,13 @@ import (
 
 	"github.com/konflux-ci/konflux-ci/test/go-tests/pkg/utils/tekton"
 	pipeline "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	"knative.dev/pkg/apis"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/yaml"
@@ -101,6 +103,90 @@ func (t *Controller) GetPipelineRunLogs(prefix, pipelineRunName, namespace strin
 		}
 	}
 	return podLog, nil
+}
+
+// DescribePipelineRunTasks loads each child TaskRun and returns its status, including
+// the current step. A TaskRun that cannot be loaded is still named.
+func (t *Controller) DescribePipelineRunTasks(pr *pipeline.PipelineRun) string {
+	var b strings.Builder
+	if len(pr.Status.ChildReferences) == 0 {
+		b.WriteString("Tasks: none recorded in status.childReferences\n")
+	} else {
+		b.WriteString("Tasks:\n")
+		for _, chr := range pr.Status.ChildReferences {
+			tr := &pipeline.TaskRun{}
+			err := t.KubeRest().Get(context.Background(), types.NamespacedName{Namespace: pr.Namespace, Name: chr.Name}, tr)
+			if err != nil {
+				b.WriteString(tekton.FormatChildTaskStatus(chr.PipelineTaskName, chr.Name, nil, err))
+				continue
+			}
+			b.WriteString(tekton.FormatChildTaskStatus(chr.PipelineTaskName, chr.Name, tr, nil))
+		}
+	}
+	b.WriteString(tekton.FormatSkippedTasks(pr))
+	return b.String()
+}
+
+// DescribePipelineRunFailure is the failure report: Succeeded condition, every child
+// TaskRun, and container logs for tasks that have failed. Tasks with no pod keep
+// their condition message so a failure before pod creation is still visible.
+func (t *Controller) DescribePipelineRunFailure(pr *pipeline.PipelineRun) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", tekton.FormatPipelineRunCondition(pr))
+	b.WriteString(t.DescribePipelineRunTasks(pr))
+	if tekton.HasPipelineRunFailed(pr) {
+		b.WriteString(t.failedTaskPodLogs(pr))
+	}
+	return b.String()
+}
+
+func (t *Controller) failedTaskPodLogs(pr *pipeline.PipelineRun) string {
+	var b strings.Builder
+	for _, chr := range pr.Status.ChildReferences {
+		tr := &pipeline.TaskRun{}
+		if err := t.KubeRest().Get(context.Background(), types.NamespacedName{Namespace: pr.Namespace, Name: chr.Name}, tr); err != nil {
+			fmt.Fprintf(&b, "Logs for task %s TaskRun %s: failed to get TaskRun: %v\n", chr.PipelineTaskName, chr.Name, err)
+			continue
+		}
+		cond := tr.GetStatusCondition().GetCondition(apis.ConditionSucceeded)
+		if !cond.IsFalse() {
+			continue
+		}
+		if tr.Status.PodName == "" {
+			fmt.Fprintf(&b, "Logs for task %s TaskRun %s: no pod (reason=%s message=%s)\n",
+				chr.PipelineTaskName, tr.Name, cond.GetReason(), cond.GetMessage())
+			continue
+		}
+		fmt.Fprintf(&b, "Logs for failed task %s TaskRun %s pod %s:\n", chr.PipelineTaskName, tr.Name, tr.Status.PodName)
+		b.WriteString(t.podContainerLogs(tr.Status.PodName, pr.Namespace))
+	}
+	return b.String()
+}
+
+func (t *Controller) podContainerLogs(podName, namespace string) string {
+	pod, err := t.KubeInterface().CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Sprintf("  failed to get pod %s: %v\n", podName, err)
+	}
+	var b strings.Builder
+	writeContainers := func(kind string, containers []corev1.Container) {
+		for _, c := range containers {
+			cLog, logErr := t.fetchContainerLog(podName, c.Name, namespace)
+			fmt.Fprintf(&b, "  %s %s:\n", kind, c.Name)
+			if logErr != nil {
+				fmt.Fprintf(&b, "  failed to get logs: %v\n", logErr)
+			}
+			if cLog != "" {
+				b.WriteString(cLog)
+				if !strings.HasSuffix(cLog, "\n") {
+					b.WriteString("\n")
+				}
+			}
+		}
+	}
+	writeContainers("init", pod.Spec.InitContainers)
+	writeContainers("container", pod.Spec.Containers)
+	return b.String()
 }
 
 // GetPipelineRunWatch returns pipelineRun watch interface.
@@ -237,6 +323,9 @@ func (t *Controller) StorePipelineRun(prefix string, pipelineRun *pipeline.Pipel
 	pipelineRunLog, err := t.GetPipelineRunLogs(prefix, pipelineRun.Name, pipelineRun.Namespace)
 	if err != nil {
 		g.GinkgoWriter.Printf("an error happened during storing pipelineRun log %s:%s: %s\n", pipelineRun.GetNamespace(), pipelineRun.GetName(), err.Error())
+	}
+	if tekton.HasPipelineRunFailed(pipelineRun) {
+		pipelineRunLog += "\n" + t.DescribePipelineRunFailure(pipelineRun)
 	}
 	artifacts["pipelineRun-"+pipelineRun.Name+".log"] = []byte(pipelineRunLog)
 
